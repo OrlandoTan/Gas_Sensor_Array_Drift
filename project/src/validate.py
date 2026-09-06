@@ -1,11 +1,3 @@
-"""Batch-aware validation, the only kind that actually predicts the real score here.
-
-a normal random train/test split mixes measurements from the same batch into both
-sides, so a model that just memorizes batch-specific offsets scores great on the
-split and then falls apart on batch 10 for real. both schemes below hold out whole
-batches so that trap cant happen.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -33,11 +25,7 @@ def leave_one_batch_out(batch: np.ndarray):
 
 def forward_chaining(batch: np.ndarray, min_train_batches: int = 3):
     """Train on batches <= k, validate on batch k+1.
-
-    this is the honest one. every fold here only ever predicts a LATER batch from
-    EARLIER ones, which is exactly the situation batch 10 is actually in (trained on
-    all of 1-9, nothing after it to lean on). if you only have time to trust one
-    validation scheme, trust this one over leave_one_batch_out.
+    only ever predicts a later batch from earlier ones, which is exactly the situation
     """
     batches = np.unique(batch)
     for i in range(min_train_batches, len(batches)):
@@ -48,13 +36,6 @@ SCHEMES = {"forward": forward_chaining, "lobo": leave_one_batch_out}
 
 
 def evaluate(model, X: pd.DataFrame, y: np.ndarray, batch: np.ndarray, scheme: str = "forward") -> pd.DataFrame:
-    """Run a batch-aware CV and return per-fold macro F1.
-
-    the mean here is unweighted across folds, so a tiny batch counts just as much as
-    a big one. pay the most attention to the last folds, theyre the closest thing we
-    have to a rehearsal of batch 10. also remember batches 3-5 have zero Toluene rows,
-    so a fold touching those can only ever be as good as the classes it actually has.
-    """
     if scheme not in SCHEMES:
         raise ValueError(f"scheme must be one of {sorted(SCHEMES)}, got {scheme!r}")
 

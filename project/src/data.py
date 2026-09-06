@@ -72,12 +72,6 @@ def _read_csv(path: Path) -> pd.DataFrame:
 
 
 def check_assumptions(train: pd.DataFrame, test: pd.DataFrame) -> None:
-    """Fail loudly if the data stops looking like what the modelling assumes.
-
-    cheap insurance. every one of these checks exists because it actually broke
-    something for us at some point, or almost did. adding a print statement and
-    hoping for the best is not a substitute for this.
-    """
     # structural 
     assert train.shape == TRAIN_SHAPE, f"train shape changed: {train.shape}"
     assert test.shape == TEST_SHAPE, f"test shape changed: {test.shape}"

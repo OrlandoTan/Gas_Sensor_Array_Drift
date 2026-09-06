@@ -1,3 +1,10 @@
+"""
+1. 128 feature pattern (which sensors responded relative to each other (the gas fingerprint, scale free, L1 normalized over the 
+    16 sensors, per row, so it survives drift without needing to know the true concentration or the sensors baseline))
+2. Ranks 128 which is the same 16-sensor comparison as pattern, but by rank order instead of magnitude 
+3. logscale     
+4. logconc      
+"""
 
 from __future__ import annotations
 
@@ -13,33 +20,26 @@ def as_sensor_cube(df: pd.DataFrame) -> np.ndarray:
 
 
 def features(df: pd.DataFrame, state_fill: np.ndarray | None = None):
-    """Return (X, state_fill).
-
-    state_fill is the per-sensor median of logS learned on the source frame. since
-    logS isnt stacked into X (see the module docstring) it doesnt currently change
-    the returned features at all, the plumbing is just kept around so the block can
-    be switched back on later without touching the calling code in train.py.
-    """
     cube = as_sensor_cube(df)
     dr, ratio = cube[:, :, 0], cube[:, :, 1]
 
-    # L1 over the 16 sensors, per row. this is the part that actually does the
-    # heavy lifting against drift, because it doesnt care what the absolute scale
-    # of a sensor is, only how it compares to the other 15 in that same row.
+    # L1 doesnt care what the absolute scale of a sensor is, only how it 
+    # compares to the other 15 in that same row.
     l1 = np.abs(cube).sum(axis=1, keepdims=True) + 1e-6
     pattern = (cube / l1).reshape(len(df), -1)
+
+    # rank block: for each descriptor, replace every sensor's value by its rank
+    # (0..15) among the 16 sensors in that row. any drift that squashes or
+    # stretches a descriptor's values but keeps their order leaves these columns
+    # untouched, so it survives batch 10's post-shock geometry better than pattern
+    # alone. kept ALONGSIDE pattern, not instead of it. replaces the earlier dynscale approrach
+    ranks = cube.argsort(axis=1).argsort(axis=1).reshape(len(df), -1) / (N_SENSORS - 1)
 
     logscale = np.log1p(np.abs(dr)).mean(axis=1, keepdims=True)
     logconc = np.log(df["concentration"].to_numpy(float))[:, None]
 
-    # logS is supposed to estimate R0, the sensors baseline resistance, from
-    # S = dR / (ratio - 1). found out the hard way that ratio hits exactly 1.0 for
-    # a chunk of rows, which is a divide by zero, and a bunch more rows sit close
-    # enough to 1 that S blows up to something huge and useless. the conditions
-    # below (dr > 0, ratio > 1.02, S > 0) are just guardrails to throw out the
-    # garbage values before they poison the median fill.
     with np.errstate(divide="ignore", invalid="ignore"):
-        S = dr / (ratio - 1.0)  # = R0, the baseline resistance
+        S = dr / (ratio - 1.0)
         logS = np.log(np.where((dr > 0) & (ratio > 1.02) & (S > 0), S, np.nan))
 
     if state_fill is None:
@@ -47,6 +47,6 @@ def features(df: pd.DataFrame, state_fill: np.ndarray | None = None):
     logS = np.where(np.isfinite(logS), logS, state_fill)
 
     X = np.hstack(
-        [pattern, logscale, logconc]  # tested with logS included, no improvement, left out on purpose
+        [pattern, ranks, logscale, logconc]  # tested with logS included, no improvement
     )
     return X, state_fill
